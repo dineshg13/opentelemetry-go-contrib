@@ -1,0 +1,11 @@
+file_format: "0.3"
+disabled: false
+resource:
+  attributes:
+    - name: service.name
+      value: opamp-poc
+tracer_provider:
+  processors:
+    - simple:
+        exporter:
+          console: {}

@@ -1,0 +1,14 @@
+# Paste this into the OpAMP server's web UI (http://localhost:4321) for the
+# demo agent. It configures a tracer provider with a console span exporter so
+# spans emitted by opampdemo print to its stdout once the config is applied.
+file_format: "0.3"
+disabled: false
+resource:
+  attributes:
+    - name: service.name
+      value: opampdemo
+tracer_provider:
+  processors:
+    - simple:
+        exporter:
+          console: {}
