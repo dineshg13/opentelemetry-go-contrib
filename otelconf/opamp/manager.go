@@ -37,6 +37,10 @@ type Manager struct {
 	installer Installer
 	build     builderFunc
 
+	// applyMu serializes whole config applies (remote, bootstrap, and local
+	// ApplyConfig) so an in-flight build/swap cannot interleave with another.
+	applyMu sync.Mutex
+
 	mu       sync.Mutex
 	current  *SDK
 	lastDesc *protobufs.AgentDescription

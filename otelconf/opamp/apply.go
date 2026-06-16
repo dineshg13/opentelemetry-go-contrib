@@ -90,6 +90,9 @@ func (m *Manager) ensureServiceInstanceID(conf *otelconf.OpenTelemetryConfigurat
 // shared by the remote-config and bootstrap paths and is safe to call without an
 // OpAMP client.
 func (m *Manager) installConfig(ctx context.Context, cfg []byte) error {
+	m.applyMu.Lock()
+	defer m.applyMu.Unlock()
+
 	conf, err := otelconf.ParseYAML(cfg)
 	if err != nil {
 		return fmt.Errorf("opamp: parse configuration: %w", err)
@@ -150,6 +153,29 @@ func (m *Manager) updateAgentDescription(ctx context.Context, conf *otelconf.Ope
 			m.logger.Errorf(ctx, "opamp: set agent description failed: %v", err)
 		}
 	}
+}
+
+// ApplyConfig applies a declarative OpenTelemetry configuration locally, exactly
+// as if it had arrived from the OpAMP server: it builds an SDK, installs it
+// through the configured [Installer], shuts down the previously installed SDK,
+// records the bytes as the effective configuration, and refreshes the agent
+// description. On failure the current SDK is left untouched.
+//
+// It is the way to change configuration without an OpAMP server — useful for
+// tests and for local config sources such as a file watch or a SIGHUP reload.
+// If an OpAMP client is connected, the new effective configuration is reported
+// to the server; no remote config status is recorded, since the change did not
+// originate from the server.
+func (m *Manager) ApplyConfig(ctx context.Context, cfg []byte) error {
+	if err := m.installConfig(ctx, cfg); err != nil {
+		return err
+	}
+	if m.client != nil {
+		if err := m.client.UpdateEffectiveConfig(ctx); err != nil {
+			m.logger.Errorf(ctx, "opamp: update effective config failed: %v", err)
+		}
+	}
+	return nil
 }
 
 // applyRemoteConfig extracts, installs, and records a remote configuration, then

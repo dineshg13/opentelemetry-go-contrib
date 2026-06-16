@@ -288,6 +288,43 @@ func TestProviderAccessorsDefaultToNoop(t *testing.T) {
 	require.NoError(t, m.Shutdown(context.Background()))
 }
 
+func TestApplyConfigSwapsConfigWithoutServer(t *testing.T) {
+	store := NewMemoryStateStore()
+	m := newTestManager(t, WithStateStore(store)) // m.client is nil: no server
+
+	var aShutdown atomic.Int32
+	sdkA := &SDK{Shutdown: func(context.Context) error { aShutdown.Add(1); return nil }}
+	sdkB := &SDK{Shutdown: func(context.Context) error { return nil }}
+	builds := []*SDK{sdkA, sdkB}
+	var idx int
+	m.build = func(context.Context, *otelconf.OpenTelemetryConfiguration) (*SDK, error) {
+		sdk := builds[idx]
+		idx++
+		return sdk, nil
+	}
+
+	cfgA := []byte("file_format: \"0.3\"\nresource:\n  attributes:\n    - name: service.name\n      value: svc-a\n")
+	cfgB := []byte("file_format: \"0.3\"\nresource:\n  attributes:\n    - name: service.name\n      value: svc-b\n")
+
+	require.NoError(t, m.ApplyConfig(context.Background(), cfgA))
+	assert.Same(t, sdkA, m.current)
+
+	// Changing config swaps the SDK and shuts the previous one down.
+	require.NoError(t, m.ApplyConfig(context.Background(), cfgB))
+	assert.Same(t, sdkB, m.current)
+	assert.Equal(t, int32(1), aShutdown.Load(), "previous SDK shut down after swap")
+
+	// Effective config reflects the latest applied bytes.
+	eff, err := store.EffectiveConfig(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, cfgB, eff)
+
+	// A local apply records no remote config status.
+	status, err := store.RemoteConfigStatus(context.Background())
+	require.NoError(t, err)
+	assert.Nil(t, status)
+}
+
 func TestNewManagerRequiresServerURL(t *testing.T) {
 	_, err := NewManager()
 	assert.Error(t, err)
