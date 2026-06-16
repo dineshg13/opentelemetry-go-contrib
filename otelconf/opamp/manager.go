@@ -294,7 +294,10 @@ func (m *Manager) Start(ctx context.Context) error {
 				m.logger.Debugf(ctx, "opamp: connected to server")
 			},
 			OnConnectFailed: func(ctx context.Context, err error) {
-				m.logger.Errorf(ctx, "opamp: connection failed: %v", err)
+				// The client already logs the connection failure (and retries
+				// with exponential backoff) through this same logger, so log at
+				// debug here to avoid duplicating it on every retry.
+				m.logger.Debugf(ctx, "opamp: connection failed: %v", err)
 			},
 			OnError: func(ctx context.Context, e *protobufs.ServerErrorResponse) {
 				m.logger.Errorf(ctx, "opamp: server error: %s", e.GetErrorMessage())

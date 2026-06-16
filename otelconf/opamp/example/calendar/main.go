@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/log/global"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 const (
@@ -70,8 +71,13 @@ func realMain() error {
 	ctx := context.Background()
 
 	// Bootstrap logger used until the OpenTelemetry logger provider is installed.
+	// Stack traces are limited to fatal errors so routine OpAMP reconnect
+	// failures (which retry with exponential backoff) do not dump a trace each.
 	var err error
-	logger, err = zap.NewDevelopment()
+	logger, err = zap.NewDevelopment(
+		zap.AddStacktrace(zapcore.FatalLevel),
+		zap.IncreaseLevel(zapcore.InfoLevel),
+	)
 	if err != nil {
 		return err
 	}
