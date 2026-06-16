@@ -21,9 +21,6 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/open-telemetry/opamp-go/client/types"
-	"github.com/open-telemetry/opamp-go/protobufs"
-
 	"go.opentelemetry.io/contrib/otelconf/opamp"
 	"go.opentelemetry.io/otel"
 )
@@ -41,20 +38,14 @@ func (stdoutLogger) Errorf(_ context.Context, format string, v ...any) {
 
 func main() {
 	serverURL := flag.String("server", "wss://127.0.0.1:4320/v1/opamp", "OpAMP server URL")
-	serviceName := flag.String("service", "opampdemo", "service.name reported to the server")
 	flag.Parse()
 
-	descr := &protobufs.AgentDescription{
-		IdentifyingAttributes: []*protobufs.KeyValue{{
-			Key:   "service.name",
-			Value: &protobufs.AnyValue{Value: &protobufs.AnyValue_StringValue{StringValue: *serviceName}},
-		}},
-	}
-
+	// The agent identity (service.name, service.instance.id) is derived from the
+	// OpenTelemetry resource in the applied config, per the OpAMP SDK guidelines;
+	// the instance UID is generated and reported automatically. Set service.name
+	// via the config's resource (or OTEL_SERVICE_NAME for the bootstrap default).
 	mgr, err := opamp.NewManager(
 		opamp.WithServerURL(*serverURL),
-		opamp.WithInstanceUID(types.InstanceUid{0xDE, 0xAD, 0xBE, 0xEF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
-		opamp.WithAgentDescription(descr),
 		opamp.WithLogger(stdoutLogger{}),
 		opamp.WithInstaller(opamp.GlobalInstaller{}),
 		// The reference opamp-go example server uses a self-signed certificate.

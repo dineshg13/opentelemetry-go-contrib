@@ -10,6 +10,8 @@ import (
 
 	"github.com/open-telemetry/opamp-go/client/types"
 	"github.com/open-telemetry/opamp-go/protobufs"
+
+	"go.opentelemetry.io/contrib/otelconf"
 )
 
 // transport selects the OpAMP wire protocol.
@@ -34,15 +36,16 @@ type config struct {
 	store            StateStore
 	installer        Installer
 	transport        transport
+	bootstrap        []byte
 
-	// build constructs an SDK from declarative configuration bytes. It is
+	// build constructs an SDK from a parsed declarative configuration. It is
 	// injectable so the apply path can be exercised without a real SDK. When
 	// nil, NewManager installs the otelconf-backed builder.
 	build builderFunc
 }
 
-// builderFunc constructs an SDK from declarative configuration bytes.
-type builderFunc func(ctx context.Context, cfg []byte) (*SDK, error)
+// builderFunc constructs an SDK from a parsed declarative configuration.
+type builderFunc func(ctx context.Context, conf *otelconf.OpenTelemetryConfiguration) (*SDK, error)
 
 // Option configures a Manager.
 type Option interface {
@@ -93,6 +96,14 @@ func WithStateStore(s StateStore) Option {
 // to NoopInstaller so that no process-wide globals are mutated unless requested.
 func WithInstaller(i Installer) Option {
 	return optionFunc(func(c *config) { c.installer = i })
+}
+
+// WithBootstrap sets a declarative OpenTelemetry configuration to apply locally
+// during [NewSDK], before any remote configuration is received. It gives the
+// process working providers immediately and on first connect is reported as the
+// effective configuration. It has no effect when using [NewManager] directly.
+func WithBootstrap(cfg []byte) Option {
+	return optionFunc(func(c *config) { c.bootstrap = cfg })
 }
 
 // WithWebSocket forces the WebSocket transport regardless of the server URL.

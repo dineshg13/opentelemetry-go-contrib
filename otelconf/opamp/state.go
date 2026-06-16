@@ -7,15 +7,22 @@ import (
 	"context"
 	"sync"
 
+	"github.com/open-telemetry/opamp-go/client/types"
 	"github.com/open-telemetry/opamp-go/protobufs"
 )
 
 // StateStore persists the OpAMP state the [Manager] must remember across
-// restarts: the last reported remote config status and the effective
-// configuration. The interface is intentionally small so it can be backed by
-// memory, disk, or any other store. Implementations must be safe for concurrent
-// use.
+// restarts: the agent instance UID, the last reported remote config status, and
+// the effective configuration. The interface is intentionally small so it can be
+// backed by memory, disk, or any other store. Implementations must be safe for
+// concurrent use.
 type StateStore interface {
+	// InstanceUID returns the persisted agent instance UID. The bool is false
+	// when none has been saved.
+	InstanceUID(context.Context) (types.InstanceUid, bool, error)
+	// SaveInstanceUID saves the agent instance UID so it is stable across
+	// restarts.
+	SaveInstanceUID(context.Context, types.InstanceUid) error
 	// RemoteConfigStatus returns the last saved remote config status, or nil if
 	// none has been saved.
 	RemoteConfigStatus(context.Context) (*protobufs.RemoteConfigStatus, error)
@@ -32,6 +39,8 @@ type StateStore interface {
 // for a proof of concept but loses state when the process exits.
 type memoryStateStore struct {
 	mu              sync.Mutex
+	instanceUID     types.InstanceUid
+	hasInstanceUID  bool
 	status          *protobufs.RemoteConfigStatus
 	effectiveConfig []byte
 }
@@ -39,6 +48,20 @@ type memoryStateStore struct {
 // NewMemoryStateStore returns a StateStore that keeps state in memory.
 func NewMemoryStateStore() StateStore {
 	return &memoryStateStore{}
+}
+
+func (s *memoryStateStore) InstanceUID(context.Context) (types.InstanceUid, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.instanceUID, s.hasInstanceUID, nil
+}
+
+func (s *memoryStateStore) SaveInstanceUID(_ context.Context, uid types.InstanceUid) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.instanceUID = uid
+	s.hasInstanceUID = true
+	return nil
 }
 
 func (s *memoryStateStore) RemoteConfigStatus(context.Context) (*protobufs.RemoteConfigStatus, error) {

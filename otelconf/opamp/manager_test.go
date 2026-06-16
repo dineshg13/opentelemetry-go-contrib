@@ -15,12 +15,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.opentelemetry.io/contrib/otelconf"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 )
 
 const applied = protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED
 const failed = protobufs.RemoteConfigStatuses_RemoteConfigStatuses_FAILED
+
+// validYAML is a minimal config that parses, for tests that inject the builder
+// and only care about the install/apply flow, not the SDK contents.
+const validYAML = "file_format: \"0.3\"\n"
 
 // remoteConfig builds a single-file AgentRemoteConfig keyed by "".
 func remoteConfig(body string) *protobufs.AgentRemoteConfig {
@@ -160,11 +165,11 @@ func TestApplyBuildFailureKeepsPrevious(t *testing.T) {
 	prev := &SDK{Shutdown: func(context.Context) error { prevShutdown.Add(1); return nil }}
 	m.current = prev
 
-	m.build = func(context.Context, []byte) (*SDK, error) {
+	m.build = func(context.Context, *otelconf.OpenTelemetryConfiguration) (*SDK, error) {
 		return nil, errors.New("boom")
 	}
 
-	err := m.applyRemoteConfig(context.Background(), remoteConfig("anything"))
+	err := m.applyRemoteConfig(context.Background(), remoteConfig(validYAML))
 	require.Error(t, err)
 
 	// Previous SDK is untouched.
@@ -184,19 +189,19 @@ func TestPreviousShutdownAfterSuccessfulReplacement(t *testing.T) {
 
 	builds := []*SDK{sdkA, sdkB}
 	var idx int
-	m.build = func(context.Context, []byte) (*SDK, error) {
+	m.build = func(context.Context, *otelconf.OpenTelemetryConfiguration) (*SDK, error) {
 		sdk := builds[idx]
 		idx++
 		return sdk, nil
 	}
 
 	// First apply installs A.
-	require.NoError(t, m.applyRemoteConfig(context.Background(), remoteConfig("a")))
+	require.NoError(t, m.applyRemoteConfig(context.Background(), remoteConfig(validYAML)))
 	assert.Same(t, sdkA, m.current)
 	assert.Equal(t, int32(0), aShutdown.Load())
 
 	// Second apply installs B and shuts down A exactly once.
-	require.NoError(t, m.applyRemoteConfig(context.Background(), remoteConfig("b")))
+	require.NoError(t, m.applyRemoteConfig(context.Background(), remoteConfig(validYAML)))
 	assert.Same(t, sdkB, m.current)
 	assert.Equal(t, int32(1), aShutdown.Load())
 	assert.Equal(t, int32(0), bShutdown.Load())
@@ -218,9 +223,9 @@ func TestInstallFailureShutsDownNextAndKeepsCurrent(t *testing.T) {
 	m.current = prev
 
 	next := &SDK{Shutdown: func(context.Context) error { nextShutdown.Add(1); return nil }}
-	m.build = func(context.Context, []byte) (*SDK, error) { return next, nil }
+	m.build = func(context.Context, *otelconf.OpenTelemetryConfiguration) (*SDK, error) { return next, nil }
 
-	err := m.applyRemoteConfig(context.Background(), remoteConfig("x"))
+	err := m.applyRemoteConfig(context.Background(), remoteConfig(validYAML))
 	require.Error(t, err)
 
 	// The freshly built SDK is shut down to avoid a leak; current is unchanged.
@@ -241,6 +246,46 @@ func TestGlobalInstallerSetsPropagator(t *testing.T) {
 
 	// Installing an SDK with nil fields must not panic.
 	assert.NoError(t, GlobalInstaller{}.Install(context.Background(), SDK{}, nil))
+}
+
+func TestInstallConfigBootstrapPath(t *testing.T) {
+	store := NewMemoryStateStore()
+	m := newTestManager(t, WithStateStore(store))
+
+	body, err := os.ReadFile(filepath.Join("testdata", "basic.yaml"))
+	require.NoError(t, err)
+
+	// installConfig is the bootstrap path: it installs and records effective
+	// config but does not report a remote config status (no server hash).
+	require.NoError(t, m.installConfig(context.Background(), body))
+
+	require.NotNil(t, m.current)
+	eff, err := store.EffectiveConfig(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, body, eff)
+
+	status, err := store.RemoteConfigStatus(context.Background())
+	require.NoError(t, err)
+	assert.Nil(t, status, "bootstrap must not record a remote config status")
+
+	require.NoError(t, m.Shutdown(context.Background()))
+}
+
+func TestProviderAccessorsDefaultToNoop(t *testing.T) {
+	m := newTestManager(t)
+
+	// No configuration applied yet: accessors must return non-nil no-ops.
+	assert.NotNil(t, m.TracerProvider())
+	assert.NotNil(t, m.MeterProvider())
+	assert.NotNil(t, m.LoggerProvider())
+	assert.NotNil(t, m.Propagator())
+
+	// After applying a config, accessors expose the installed providers.
+	body, err := os.ReadFile(filepath.Join("testdata", "basic.yaml"))
+	require.NoError(t, err)
+	require.NoError(t, m.installConfig(context.Background(), body))
+	assert.Same(t, m.current.TracerProvider, m.TracerProvider())
+	require.NoError(t, m.Shutdown(context.Background()))
 }
 
 func TestNewManagerRequiresServerURL(t *testing.T) {
