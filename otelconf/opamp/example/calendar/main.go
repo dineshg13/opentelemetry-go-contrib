@@ -167,33 +167,13 @@ func realMain() error {
 		}
 	}()
 
-	// Demonstrate changing configuration without an OpAMP server: SIGHUP
-	// reloads OTEL_CONFIG_FILE (or the embedded bootstrap) and applies it
-	// through the same pipeline a remote config would use, swapping providers
-	// in place. SIGINT/SIGTERM shut down.
+	// Runtime configuration is server-authoritative: after the bootstrap config
+	// is applied (and reported) at startup, only the OpAMP server changes the
+	// configuration. There is no local runtime reload. Wait for a termination
+	// signal and shut down cleanly.
 	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGHUP, os.Interrupt, syscall.SIGTERM)
-	for s := range sig {
-		if s != syscall.SIGHUP {
-			logger.Info("shutting down", zap.String("signal", s.String()))
-			_ = srv.Shutdown(context.Background())
-			return nil
-		}
-		reloadPath := getEnv("OTEL_CONFIG_FILE", "")
-		newCfg := cfg
-		if reloadPath != "" {
-			if b, rerr := os.ReadFile(reloadPath); rerr != nil { //nolint:gosec // operator-provided path.
-				logger.Error("reload: read config failed", zap.Error(rerr))
-				continue
-			} else {
-				newCfg = b
-			}
-		}
-		if rerr := sdk.ApplyConfig(ctx, newCfg); rerr != nil {
-			logger.Error("reload: apply config failed", zap.Error(rerr))
-			continue
-		}
-		logger.Info("reloaded configuration via SIGHUP", zap.String("source", reloadPath))
-	}
-	return nil
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	s := <-sig
+	logger.Info("shutting down", zap.String("signal", s.String()))
+	return srv.Shutdown(context.Background())
 }

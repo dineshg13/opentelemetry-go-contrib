@@ -43,27 +43,30 @@ func resourceConfig(attrs map[string]string) *otelconf.OpenTelemetryConfiguratio
 
 func TestDeriveAgentDescriptionSplit(t *testing.T) {
 	conf := resourceConfig(map[string]string{
-		keyServiceName:           "calendar",
-		keyServiceNamespace:      "shop",
-		"deployment.environment": "prod",
+		keyServiceName:               "calendar",
+		keyServiceNamespace:          "shop",
+		keyDeploymentEnvironmentName: "prod",
 	})
 
 	d := deriveAgentDescription(conf, "inst-1", nil)
 
-	// service.* are identifying and match the resource.
+	// service.* and telemetry.sdk.name are identifying and match the resource.
 	assert.Equal(t, "calendar", identifyingValue(t, d, keyServiceName))
 	assert.Equal(t, "shop", identifyingValue(t, d, keyServiceNamespace))
 	assert.Equal(t, "inst-1", identifyingValue(t, d, keyServiceInstanceID))
+	assert.Equal(t, "opentelemetry", identifyingValue(t, d, keyTelemetrySDKName))
 
-	// Custom and SDK attributes are non-identifying.
-	_, ok := findKV(d.GetNonIdentifyingAttributes(), "deployment.environment")
-	assert.True(t, ok, "custom attribute should be non-identifying")
+	// deployment.environment.name and other telemetry.sdk.* are non-identifying.
+	_, ok := findKV(d.GetNonIdentifyingAttributes(), keyDeploymentEnvironmentName)
+	assert.True(t, ok, "deployment.environment.name should be non-identifying")
 	_, ok = findKV(d.GetNonIdentifyingAttributes(), "telemetry.sdk.language")
-	assert.True(t, ok, "telemetry.sdk.* should be non-identifying")
+	assert.True(t, ok, "telemetry.sdk.language should be non-identifying")
 
 	// Identity keys must not leak into non-identifying.
 	_, ok = findKV(d.GetNonIdentifyingAttributes(), keyServiceName)
 	assert.False(t, ok)
+	_, ok = findKV(d.GetNonIdentifyingAttributes(), keyTelemetrySDKName)
+	assert.False(t, ok, "telemetry.sdk.name must not also be non-identifying")
 }
 
 func TestDeriveAgentDescriptionInjectsInstanceID(t *testing.T) {

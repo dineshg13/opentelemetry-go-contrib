@@ -109,8 +109,14 @@ func NewManager(opts ...Option) (*Manager, error) {
 // With WithInstaller(GlobalInstaller{}) the providers are installed into the
 // OpenTelemetry globals, so callers should acquire telemetry through the otel
 // globals (for example otel.Tracer) so that handles follow remote-config swaps.
-// If a bootstrap configuration is provided it is applied before connecting; a
-// bootstrap failure aborts NewSDK.
+//
+// Startup configuration follows a resume-or-bootstrap policy (see
+// [Manager.startupConfig]): if the server has previously applied a configuration
+// (persisted in the StateStore), that configuration is resumed so a restart does
+// not regress to the bootstrap while the server is unreachable; otherwise the
+// bootstrap configuration is applied. Either way the startup configuration is
+// reported to the server as the effective configuration on connect. A startup
+// configuration failure aborts NewSDK.
 func NewSDK(ctx context.Context, opts ...Option) (*Manager, error) {
 	m, err := NewManager(opts...)
 	if err != nil {
@@ -119,9 +125,13 @@ func NewSDK(ctx context.Context, opts ...Option) (*Manager, error) {
 	if err := m.resolveIdentity(ctx); err != nil {
 		return nil, err
 	}
-	if len(m.cfg.bootstrap) > 0 {
-		if err := m.installConfig(ctx, m.cfg.bootstrap); err != nil {
-			return nil, fmt.Errorf("opamp: apply bootstrap configuration: %w", err)
+	startupCfg, err := m.startupConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(startupCfg) > 0 {
+		if err := m.installConfig(ctx, startupCfg); err != nil {
+			return nil, fmt.Errorf("opamp: apply startup configuration: %w", err)
 		}
 	}
 	if err := m.Start(ctx); err != nil {
@@ -220,6 +230,35 @@ func (m *Manager) resolveIdentity(ctx context.Context) error {
 	m.instanceUID = uid
 	m.serviceInstanceID = uuid.UUID(uid).String()
 	return nil
+}
+
+// startupConfig chooses the configuration to apply at startup.
+//
+// If the server has previously sent a remote configuration (a RemoteConfigStatus
+// with a non-empty hash is persisted), the last applied effective configuration
+// is resumed: this keeps a restart on the server-authoritative configuration even
+// while the server is unreachable, rather than regressing to the bootstrap. The
+// persisted RemoteConfigStatus is replayed to the server on connect, so the
+// server only re-pushes when it actually has a newer config.
+//
+// Otherwise (true first run, or the server has never engaged) the bootstrap
+// configuration is used, so a redeployed binary's updated bootstrap takes effect.
+func (m *Manager) startupConfig(ctx context.Context) ([]byte, error) {
+	status, err := m.store.RemoteConfigStatus(ctx)
+	if err != nil {
+		m.logger.Errorf(ctx, "opamp: load remote config status: %v", err)
+	}
+	if status != nil && len(status.GetLastRemoteConfigHash()) > 0 {
+		stored, err := m.store.EffectiveConfig(ctx)
+		if err != nil {
+			m.logger.Errorf(ctx, "opamp: load effective config: %v", err)
+		}
+		if len(stored) > 0 {
+			m.logger.Debugf(ctx, "opamp: resuming last server-applied configuration")
+			return stored, nil
+		}
+	}
+	return m.cfg.bootstrap, nil
 }
 
 // newClient creates the OpAMP client for the configured transport. The default

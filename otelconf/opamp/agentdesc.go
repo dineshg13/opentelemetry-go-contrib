@@ -14,32 +14,39 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 )
 
-// Resource attribute keys that the OpAMP OpenTelemetry SDK guidelines require to
-// be reported as identifying attributes. The spec writes service.namespace as
-// "service.namespace.name"; both spellings are treated as identifying so the
-// agent identity matches the telemetry resource regardless of convention.
+// Resource attribute keys used to classify identifying vs non-identifying
+// attributes. Names follow the OpenTelemetry semantic conventions. The spec
+// writes service.namespace as "service.namespace.name"; both spellings are
+// treated as identifying so the agent identity matches the telemetry resource
+// regardless of convention.
 const (
-	keyServiceName          = "service.name"
-	keyServiceInstanceID    = "service.instance.id"
-	keyServiceNamespace     = "service.namespace"
-	keyServiceNamespaceName = "service.namespace.name"
+	keyServiceName               = "service.name"
+	keyServiceInstanceID         = "service.instance.id"
+	keyServiceNamespace          = "service.namespace"
+	keyServiceNamespaceName      = "service.namespace.name"
+	keyTelemetrySDKName          = "telemetry.sdk.name"
+	keyDeploymentEnvironmentName = "deployment.environment.name"
 )
 
-// identifyingKeys is the set of resource attribute keys that belong in
-// AgentDescription.identifying_attributes per the OpAMP SDK guidelines.
+// identifyingKeys is the set of resource attribute keys reported as
+// AgentDescription.identifying_attributes. It covers the OpAMP SDK guidelines'
+// service.* identity plus telemetry.sdk.name. Every other resource attribute
+// (for example deployment.environment.name) is reported as non-identifying.
 var identifyingKeys = map[string]bool{
 	keyServiceName:          true,
 	keyServiceInstanceID:    true,
 	keyServiceNamespace:     true,
 	keyServiceNamespaceName: true,
+	keyTelemetrySDKName:     true,
 }
 
 // deriveAgentDescription builds an OpAMP AgentDescription from the SDK resource
 // described by conf, following the OpAMP OpenTelemetry SDK guidelines:
 //
-//   - service.name, service.instance.id, and service.namespace are reported as
-//     identifying attributes and MUST match the telemetry resource.
-//   - all other resource attributes are reported as non-identifying attributes.
+//   - service.name, service.instance.id, service.namespace, and telemetry.sdk.name
+//     are reported as identifying attributes and MUST match the telemetry resource.
+//   - all other resource attributes (for example deployment.environment.name) are
+//     reported as non-identifying attributes.
 //
 // The attribute set mirrors how otelconf builds the resource: the SDK default
 // attributes (telemetry.sdk.*, service.name, and any from the environment)

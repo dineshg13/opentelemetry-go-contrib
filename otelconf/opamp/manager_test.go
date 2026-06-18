@@ -39,6 +39,30 @@ func remoteConfig(body string) *protobufs.AgentRemoteConfig {
 	}
 }
 
+func TestStartupConfigResumesServerConfigElseBootstrap(t *testing.T) {
+	ctx := context.Background()
+
+	// First run / server never engaged: use the bootstrap config.
+	m := newTestManager(t, WithBootstrap([]byte("boot")))
+	cfg, err := m.startupConfig(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "boot", string(cfg), "first run should apply the bootstrap")
+
+	// Server has applied a config before (status with hash persisted): resume
+	// the last effective config instead of the bootstrap.
+	store := NewMemoryStateStore()
+	require.NoError(t, store.SaveRemoteConfigStatus(ctx, &protobufs.RemoteConfigStatus{
+		LastRemoteConfigHash: []byte("hash-1"),
+		Status:               applied,
+	}))
+	require.NoError(t, store.SaveEffectiveConfig(ctx, []byte("server-config")))
+
+	m2 := newTestManager(t, WithBootstrap([]byte("boot")), WithStateStore(store))
+	cfg2, err := m2.startupConfig(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "server-config", string(cfg2), "restart should resume the server config")
+}
+
 // newTestManager builds a manager with no OpAMP client (m.client stays nil) so
 // applyRemoteConfig can be driven directly without a live server.
 func newTestManager(t *testing.T, opts ...Option) *Manager {
