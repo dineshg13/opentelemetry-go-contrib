@@ -1,0 +1,31 @@
+# Bootstrap OpenTelemetry configuration for the calendar service.
+#
+# This declarative config is parsed by go.opentelemetry.io/contrib/otelconf and
+# applied at startup via opamp.NewSDK(WithBootstrap(...)). It uses console
+# exporters so the service produces visible telemetry with no collector running.
+# Push config-datadog.yaml through the OpAMP server at runtime to switch to OTLP
+# export without restarting the service.
+file_format: "0.3"
+disabled: false
+resource:
+  attributes:
+    - name: service.name
+      value: calendar-rest-go
+propagator:
+  composite_list: "tracecontext,baggage"
+tracer_provider:
+  processors:
+    - simple:
+        exporter:
+          console: {}
+meter_provider:
+  readers:
+    - periodic:
+        interval: 5000
+        exporter:
+          console: {}
+logger_provider:
+  processors:
+    - simple:
+        exporter:
+          console: {}

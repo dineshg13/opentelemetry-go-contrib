@@ -1,0 +1,34 @@
+# Runtime OpenTelemetry configuration exporting via OTLP/HTTP, suitable for a
+# Datadog Agent or OpenTelemetry Collector listening on localhost:4318.
+#
+# Paste this into the OpAMP server's web UI for the calendar agent to switch the
+# running service from console export to OTLP export with no restart. Delta
+# temporality is the recommended setting for Datadog.
+file_format: "0.3"
+disabled: false
+resource:
+  attributes:
+    - name: service.name
+      value: calendar-rest-go
+propagator:
+  composite_list: "tracecontext,baggage"
+tracer_provider:
+  processors:
+    - batch:
+        exporter:
+          otlp_http:
+            endpoint: http://localhost:4318/v1/traces
+meter_provider:
+  readers:
+    - periodic:
+        interval: 10000
+        exporter:
+          otlp_http:
+            endpoint: http://localhost:4318/v1/metrics
+            temporality_preference: delta
+logger_provider:
+  processors:
+    - batch:
+        exporter:
+          otlp_http:
+            endpoint: http://localhost:4318/v1/logs
